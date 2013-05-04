@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Poprocks Backup v. 0.1
+# Poprocks Backup v. 0.1.1
 # 
 #
 # Released under the terms of the GNU General Public License
@@ -25,32 +25,34 @@ MAIL_ADDRESSES="" # separate multiple email addresses with a space
 LOG_DIR="/var/log/backup"
 
 # Script output definitions
-GENERAL_OUTPUT_DIR="/var/backups" # point this to the desired local backup location, such as a second block device
-GENERAL_PROFILE_NAME="backup" # backup prefix
+BACKUPDIR="/var/backups" # point this to the desired local backup location, such as a second block device
+BACKUP_PREFIX="backup" # backup prefix
 
 # Folder archive definitions
 FOLDERS_ENABLED=1
-BACKUP_SAVE_DAYS=7
+FILESPERBACKUP=2 # creates separate tarballs for files and dbs
+DAYSTOKEEP=7
 BACKUP="/home" # recursive file system path to archive. separate multiple directories with a space
-EXCLUDE="" # separate tar --exclude directives, written as a full path or with a wildcard, separated with a space (i.e., "/home/foo/bar *.tar.gz")
+EXCLUDE="*.tar.gz" # separate tar --exclude directives, written as a full path or with a wildcard, separated with a space (i.e., "/home/foo/bar *.tar.gz")
 
 # MySQL archive definitions
 MYSQL_ENABLED=0
-MYSQL_HOST="mysql_server_host" # typically 'localhost'
-MYSQL_USERNAME="mysql_server_user" # typically 'root'
-MYSQL_PASSWORD="mysql_server_password"
+MYSQL_HOST="" # typically 'localhost'
+MYSQL_USERNAME="" # typically 'root'
+MYSQL_PASSWORD=""
 
 # Remote FTP site definitions
 FTP_ENABLED=0
-FTP_HOST="ftp_server_host"
-FTP_USERNAME="ftp_server_user"
-FTP_PASSWORD="ftp_server_password"
+FTP_HOST=""
+FTP_USERNAME=""
+FTP_PASSWORD=""
 FTP_REMOTE_DIR="."
 FTP_SPACE="1048576"  # adjust this for VPS or dedicated server - 1GB or 2GB - in KB. 2 GB = 2097152
 
 # Script-specific definitions, typically you don't need to alter these
 GENERIC_MYSQLDUMP_ARGS="-h $MYSQL_HOST -u $MYSQL_USERNAME --password=$MYSQL_PASSWORD -f --opt"
-MYSQL_DATABASES=`mysql -h $MYSQL_HOST -u $MYSQL_USERNAME -p$MYSQL_PASSWORD -e 'show databases'`
+MYSQL_DATABASES=`mysql -h $MYSQL_HOST -u $MYSQL_USERNAME -p$MYSQL_PASSWORD -e 'show databases' | grep -Ev "(Database|*_schema)"`
+FILESTOKEEP=$(($FILESPERBACKUP * $DAYSTOKEEP))
 EXIT_STATUS=0
 TIMESTAMP="$(date +%Y)$(date +%m)$(date +%d)"
 
@@ -67,10 +69,10 @@ function log() {
 
 log "Starting backup script..."
 
-if [ ! -d $GENERAL_OUTPUT_DIR ] ; then
-	mkdir $GENERAL_OUTPUT_DIR
-	if [ ! -d $GENERAL_OUTPUT_DIR ] ; then
-		log "Could not create directory $GENERAL_OUTPUT_DIR, please do it manually!"
+if [ ! -d $BACKUPDIR ] ; then
+	mkdir $BACKUPDIR
+	if [ ! -d $BACKUPDIR ] ; then
+		log "Could not create directory $BACKUPDIR, please do it manually!"
 		EXIT_STATUS=5
 		exit $EXIT_STATUS
 	fi
@@ -81,9 +83,9 @@ if [ $FOLDERS_ENABLED -eq 1 ] ; then
 	if [ -z $BACKUP ] ; then
 		log "Folder backup was enabled but no folders were selected."
 	else
-		OUT=$GENERAL_OUTPUT_DIR/$GENERAL_PROFILE_NAME-folders-$TIMESTAMP.tar.gz
+		OUT=$BACKUPDIR/$BACKUP_PREFIX-folders-$TIMESTAMP.tar.gz
 		log "Compressing folders..."
-		tar -X <(echo -e ${EXCLUDE// /\\n}) --ignore-failed-read -zcf $OUT $BACKUP
+		tar -X <(echo -e ${EXCLUDE// /\\n}) --ignore-failed-read -hzcf $OUT $BACKUP
 		if [ $? -eq 0 ]; then
 			log "Compression of archive completed without error."
 		else
@@ -99,7 +101,7 @@ if [ $MYSQL_ENABLED -eq 1 ] ; then
 	log "Beginning MySQL archive operation..."
 	for DATABASE in $MYSQL_DATABASES; do
 		log "Starting to backup database $DATABASE"
-		mysqldump $GENERIC_MYSQLDUMP_ARGS --databases $DATABASE > $GENERAL_OUTPUT_DIR/$DATABASE.sql
+		mysqldump $GENERIC_MYSQLDUMP_ARGS --databases $DATABASE > $BACKUPDIR/$DATABASE.sql
 		if [ $? -eq 0 ]; then
 			log "Dump of database $DATABASE completed without error."
         else
@@ -110,8 +112,8 @@ if [ $MYSQL_ENABLED -eq 1 ] ; then
 
 	log "Creating single MySQL database archive..."
 	CURRENT_DIR=`pwd`
-	cd $GENERAL_OUTPUT_DIR
-	OUT=$GENERAL_PROFILE_NAME-mysql-$TIMESTAMP.tar.gz
+	cd $BACKUPDIR
+	OUT=$BACKUP_PREFIX-mysql-$TIMESTAMP.tar.gz
 	tar -zcf $OUT ./*.sql
 	rm -f ./*.sql
 	cd $CURRENT_DIR
@@ -119,8 +121,11 @@ if [ $MYSQL_ENABLED -eq 1 ] ; then
 fi
 
 if [ $EXIT_STATUS -eq 0 ] ; then
-	log "Removing outdated archives older than $BACKUP_SAVE_DAYS days..."
-	find "$GENERAL_OUTPUT_DIR" -name "$GENERAL_PROFILE_NAME-*" -mtime +"$(($BACKUP_SAVE_DAYS - 1))" -exec echo "$(date +%D) $(date +%T): Removing archive {}..." \; -exec rm -f {} \;
+	log "Removing outdated archives..."
+	# Retention. Delete the oldest files, determined by sorting via mtime attribute displayed as unix epoch timestamp.
+	if [ $(ls -1 $BACKUPDIR | wc -l) -gt $FILESTOKEEP ] ; then
+		for i in `find $BACKUPDIR -exec stat --format '%Y:%n' {} \; | sort -n | cut -d: -f 2 | head -$(($(ls -1 $BACKUPDIR | wc -l) - $FILESTOKEEP))`; do log "Removing archive $i..."; rm -f $i; done
+	fi
 	log "Removal of outdated archives complete!"
 else
 	log "Previous error detected, not removing old archives. Please analyze logs to avoid disk bloat."
@@ -128,15 +133,13 @@ fi
 
 if [ $FTP_ENABLED -eq 1 ] ; then
 	log "Beginning FTP upload operation..."
-	BACKUP_SIZE=`du $GENERAL_OUTPUT_DIR -s | cut -f1`
+	BACKUP_SIZE=`du $BACKUPDIR -s | cut -f1`
 	if [ $BACKUP_SIZE -gt $FTP_SPACE ] ; then
 		log "Unfortunately, the size of your backups is greater than $FTP_SPACE. FTP upload has been cancelled."
 		EXIT_STATUS=3
 	else    
 		log "Backing up FTP Site...";
-		lftp -u $FTP_USERNAME,$FTP_PASSWORD $FTP_HOST/$FTP_REMOTE_DIR <<END
-mirror -R -e --verbose=3 --parallel=4 --use-cache $GENERAL_OUTPUT_DIR $FTP_REMOTE_DIR
-END
+		lftp -u $FTP_USERNAME,$FTP_PASSWORD $FTP_HOST/$FTP_REMOTE_DIR -e "mirror -R -e --verbose=3 --parallel=4 --use-cache $BACKUPDIR $FTP_REMOTE_DIR; exit"
 		if [ $? -eq 0 ] ; then
 			log "FTP upload operation completed without error."
 		else
@@ -151,7 +154,7 @@ fi
 log "Current disk space:"
 echo "`df -h`"
 log "Contents of backup directory:"
-echo "`ls -lh $GENERAL_OUTPUT_DIR`"
+echo "`ls -lh $BACKUPDIR`"
 
 log "Backup script has completed with exit code: $EXIT_STATUS!"
 
