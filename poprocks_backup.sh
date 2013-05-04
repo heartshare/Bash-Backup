@@ -1,13 +1,13 @@
 #!/bin/bash
 
-# Poprocks Backup v. 0.1.1
+# Poprocks Backup v. 0.1.2
 # 
 #
 # Released under the terms of the GNU General Public License
 #     http://www.gnu.org/licenses/gpl.txt
 #
-# Usage: /path/to/backup
-#
+# Usage: /path/to/backup_script
+
 # Exit Status Codes:
 #	0: Exit without error
 #	1: Exit with folder / file archive creation error.
@@ -55,13 +55,14 @@ MYSQL_DATABASES=`mysql -h $MYSQL_HOST -u $MYSQL_USERNAME -p$MYSQL_PASSWORD -e 's
 FILESTOKEEP=$(($FILESPERBACKUP * $DAYSTOKEEP))
 EXIT_STATUS=0
 TIMESTAMP="$(date +%Y)$(date +%m)$(date +%d)"
+TMP_LOG="/var/log/backup.log"
 
 
 ### FUNCTIONS ###
 
 # Add timestamps to log call for logging
 function log() {
-    echo $(date +%D) $(date +%T): $*
+    echo $(date +%D) $(date +%T): $* > $TMP_LOG
 }
 
 
@@ -139,7 +140,7 @@ if [ $FTP_ENABLED -eq 1 ] ; then
 		EXIT_STATUS=3
 	else    
 		log "Backing up FTP Site...";
-		lftp -u $FTP_USERNAME,$FTP_PASSWORD $FTP_HOST/$FTP_REMOTE_DIR -e "mirror -R -e --verbose=3 --parallel=4 --use-cache $BACKUPDIR $FTP_REMOTE_DIR; exit"
+		lftp -u $FTP_USERNAME,$FTP_PASSWORD $FTP_HOST/$FTP_REMOTE_DIR -e "mirror -R -e --verbose=3 --parallel=4 --use-cache $BACKUPDIR $FTP_REMOTE_DIR;quit"
 		if [ $? -eq 0 ] ; then
 			log "FTP upload operation completed without error."
 		else
@@ -159,7 +160,7 @@ echo "`ls -lh $BACKUPDIR`"
 log "Backup script has completed with exit code: $EXIT_STATUS!"
 
 if [ $MAIL_ENABLED -eq 1 ] ; then
-	mail -s "`hostname` Backup Status: $EXIT_STATUS" $MAIL_ADDRESSES < /var/log/backup.log
+	mail -s "`hostname` Backup Status: $EXIT_STATUS" $MAIL_ADDRESSES < $TMP_LOG
 fi
 
 if [ ! -d $LOG_DIR ] ; then
@@ -170,8 +171,8 @@ if [ ! -d $LOG_DIR ] ; then
 fi
 
 if [ -d $LOG_DIR ] ; then
-	cp /var/log/backup.log $LOG_DIR/$TIMESTAMP.log
-	cat /dev/null > /var/log/backup.log
+	cp $TMP_LOG $LOG_DIR/$TIMESTAMP.log
+	cat /dev/null > $TMP_LOG
 fi
 
 exit $EXIT_STATUS
