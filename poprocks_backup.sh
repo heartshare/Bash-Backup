@@ -1,13 +1,12 @@
 #!/bin/bash
 
-# Poprocks Backup v. 0.1.3
-# 
+# Poprocks Backup v. 0.1.4
 #
 # Released under the terms of the GNU General Public License
 #     http://www.gnu.org/licenses/gpl.txt
 #
 # Usage: /path/to/backup_script
-
+#
 # Exit Status Codes:
 #	0: Exit without error
 #	1: Exit with folder / file archive creation error.
@@ -155,15 +154,19 @@ if [ $FTP_ENABLED -eq 1 ] ; then
 	log "FTP upload operation complete!"
 fi
 
-log "Current disk space:"
-echo "`df -h`"
+log "Current disk space:" 
+echo "`df -h`" >> $TMP_LOG
 log "Contents of backup directory:"
-echo "`ls -lh $BACKUPDIR`"
+echo "`ls -lh $BACKUPDIR`" >> $TMP_LOG
 
 log "Backup script has completed with exit code: $EXIT_STATUS!"
 
 if [ $MAIL_ENABLED -eq 1 ] ; then
+	# exim
 	mail -s "`hostname` Backup Status: $EXIT_STATUS" $MAIL_ADDRESSES < $TMP_LOG
+
+	#postfix
+	#echo -e "Subject: `hostname` Backup Status: $EXIT_STATUS\n`cat $TMP_LOG`" | sendmail $MAIL_ADDRESSES
 fi
 
 if [ ! -d $LOG_DIR ] ; then
