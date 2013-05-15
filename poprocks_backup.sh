@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Poprocks Backup v. 0.1.2
+# Poprocks Backup v. 0.1.3
 # 
 #
 # Released under the terms of the GNU General Public License
@@ -62,7 +62,7 @@ TMP_LOG="/var/log/backup.log"
 
 # Add timestamps to log call for logging
 function log() {
-    echo $(date +%D) $(date +%T): $* > $TMP_LOG
+    echo $(date +%D) $(date +%T): $* >> $TMP_LOG
 }
 
 
@@ -125,7 +125,10 @@ if [ $EXIT_STATUS -eq 0 ] ; then
 	log "Removing outdated archives..."
 	# Retention. Delete the oldest files, determined by sorting via mtime attribute displayed as unix epoch timestamp.
 	if [ $(ls -1 $BACKUPDIR | wc -l) -gt $FILESTOKEEP ] ; then
-		for i in `find $BACKUPDIR -exec stat --format '%Y:%n' {} \; | sort -n | cut -d: -f 2 | head -$(($(ls -1 $BACKUPDIR | wc -l) - $FILESTOKEEP))`; do log "Removing archive $i..."; rm -f $i; done
+		for i in `find $BACKUPDIR -exec stat --format '%Y:%n' {} \; | sort -n | cut -d: -f 2 | head -$(($(ls -1 $BACKUPDIR | wc -l) - $FILESTOKEEP))`; do 
+			log "Removing archive $i..."; 
+			rm -f $i; 
+		done
 	fi
 	log "Removal of outdated archives complete!"
 else
