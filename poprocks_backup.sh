@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Poprocks Backup v. 0.1.4
+# Poprocks Backup v. 0.1.5
 #
 # Released under the terms of the GNU General Public License
 #     http://www.gnu.org/licenses/gpl.txt
@@ -61,7 +61,7 @@ TMP_LOG="/var/log/backup.log"
 
 # Add timestamps to log call for logging
 function log() {
-    echo $(date +%D) $(date +%T): $* >> $TMP_LOG
+    echo $(date +%D) $(date +%T): "$*" >> $TMP_LOG
 }
 
 
@@ -80,12 +80,12 @@ fi
 
 if [ $FOLDERS_ENABLED -eq 1 ] ; then
 	log "Beginning folder archive operation..."
-	if [ -z $BACKUP ] ; then
+	if [[ -z $BACKUP ]] ; then
 		log "Folder backup was enabled but no folders were selected."
 	else
 		OUT=$BACKUPDIR/$BACKUP_PREFIX-folders-$TIMESTAMP.tar.gz
 		log "Compressing folders..."
-		tar -X <(echo -e ${EXCLUDE// /\\n}) --ignore-failed-read -hzcf $OUT $BACKUP
+		tar -X <(echo -e ${EXCLUDE// /\\n}) --ignore-failed-read -hzcf $OUT $BACKUP >> $TMP_LOG 2>&1
 		if [ $? -eq 0 ]; then
 			log "Compression of archive completed without error."
 		else
@@ -114,7 +114,7 @@ if [ $MYSQL_ENABLED -eq 1 ] ; then
 	CURRENT_DIR=`pwd`
 	cd $BACKUPDIR
 	OUT=$BACKUP_PREFIX-mysql-$TIMESTAMP.tar.gz
-	tar -zcf $OUT ./*.sql
+	tar -zcf $OUT ./*.sql >> $TMP_LOG 2>&1
 	rm -f ./*.sql
 	cd $CURRENT_DIR
 	log "MySQL archive creation operation complete!"
@@ -155,18 +155,20 @@ if [ $FTP_ENABLED -eq 1 ] ; then
 fi
 
 log "Current disk space:" 
-echo "`df -h`" >> $TMP_LOG
+log "`df -h`"
 log "Contents of backup directory:"
-echo "`ls -lh $BACKUPDIR`" >> $TMP_LOG
+log "`ls -lh`"
 
 log "Backup script has completed with exit code: $EXIT_STATUS!"
 
 if [ $MAIL_ENABLED -eq 1 ] ; then
-	# exim
-	mail -s "`hostname` Backup Status: $EXIT_STATUS" $MAIL_ADDRESSES < $TMP_LOG
-
-	#postfix
-	#echo -e "Subject: `hostname` Backup Status: $EXIT_STATUS\n`cat $TMP_LOG`" | sendmail $MAIL_ADDRESSES
+	if [[ `which mail` != ""]] ; then #exim
+		mail -s "`hostname` Backup Status: $EXIT_STATUS" $MAIL_ADDRESSES < $TMP_LOG
+	elif [[ `which sendmail` != "" ]] ; then #postfix
+		echo -e "Subject: `hostname` Backup Status: $EXIT_STATUS\n`cat $TMP_LOG`" | sendmail $MAIL_ADDRESSES
+	else
+		log "No available MTA."
+	fi
 fi
 
 if [ ! -d $LOG_DIR ] ; then
@@ -178,7 +180,7 @@ fi
 
 if [ -d $LOG_DIR ] ; then
 	cp $TMP_LOG $LOG_DIR/$TIMESTAMP.log
-	cat /dev/null > $TMP_LOG
+	rm $TMP_LOG
 fi
 
 exit $EXIT_STATUS
